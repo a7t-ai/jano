@@ -1,0 +1,56 @@
+{
+  "name": "jano",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible router that batches LLM requests by model so a flurry of mixed calls costs one swap, not many. Backend-agnostic; works with any number of models.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Leonardo Cardoso",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a7t-ai/jano.git"
+  },
+  "bugs": {
+    "url": "https://github.com/a7t-ai/jano/issues"
+  },
+  "homepage": "https://github.com/a7t-ai/jano#readme",
+  "keywords": [
+    "llm",
+    "openai-api",
+    "llama-cpp",
+    "queue",
+    "router",
+    "proxy",
+    "local-llm"
+  ],
+  "engines": {
+    "node": ">=23.6.0"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --experimental-strip-types --watch src/index.ts",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "undici": "^7.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.16.0",
+    "vitest": "^2.1.8"
+  }
+}

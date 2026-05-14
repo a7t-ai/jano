@@ -1,0 +1,12 @@
+.env
+models.json
+node_modules/
+logs/*.log
+logs/*.log.*
+.DS_Store
+
+# Personal/internal notes; kept locally but not published.
+NITTY-GRITTY.md
+
+# Local playground for generating README/site GIFs; not part of the published lib.
+graphics/
