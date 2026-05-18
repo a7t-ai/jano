@@ -63,7 +63,7 @@ async function forwardPassthrough(
   res: http.ServerResponse,
   upstream: string,
   model: ModelName,
-  bodyOverride: Buffer,
+  bodyOverride: Buffer
 ): Promise<void> {
   const id = String(nextId++);
   const started = Date.now();
@@ -80,7 +80,8 @@ async function forwardPassthrough(
 
   const forwardHeaders: http.OutgoingHttpHeaders = {};
   if (req.headers['content-type']) forwardHeaders['content-type'] = req.headers['content-type'];
-  if (req.headers['content-length']) forwardHeaders['content-length'] = req.headers['content-length'];
+  if (req.headers['content-length'])
+    forwardHeaders['content-length'] = req.headers['content-length'];
 
   try {
     const upstreamRes = await undiciRequest(upstream, {

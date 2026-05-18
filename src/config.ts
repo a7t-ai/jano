@@ -154,4 +154,3 @@ export function modelNames(): ModelName[] {
  *  the queue, so the dispatcher should not consider them when computing
  *  whether to invoke the swap script. */
 export const swapEligibleModels = models.filter((m) => !m.passthrough);
-
