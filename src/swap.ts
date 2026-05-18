@@ -1,21 +1,26 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { backendUrl, env, modelNames } from './config.ts';
+import { backendUrl, env, swapEligibleModels } from './config.ts';
 import type { ModelName } from './types.ts';
 import { log } from './log.ts';
 
 const execFile = promisify(execFileCb);
 
+const swapEligibleNames = (): ModelName[] => swapEligibleModels.map((m) => m.name);
+
 /**
  * Probe `<SWAP_COMMAND> status` (if implemented) to learn which model is
  * loaded at startup. Falls back to hitting each backend's /health and
  * accepting whichever responds first. Returns null if nothing answers.
+ *
+ * Only considers swap-eligible models — passthrough backends are always
+ * resident and never become "the loaded model" from the dispatcher's POV.
  */
 export async function detectLoaded(): Promise<ModelName | null> {
   try {
     const { stdout } = await execFile(env.SWAP_COMMAND, ['status']);
-    for (const name of modelNames()) {
+    for (const name of swapEligibleNames()) {
       const re = new RegExp(`(^|\\b)${escapeRegex(name)}:\\s*loaded\\b`, 'i');
       if (re.test(stdout)) return name;
     }
@@ -23,7 +28,7 @@ export async function detectLoaded(): Promise<ModelName | null> {
     // Script doesn't implement `status`. Fall through to direct health probes.
   }
 
-  for (const name of modelNames()) {
+  for (const name of swapEligibleNames()) {
     try {
       const res = await fetch(`${backendUrl(name)}/health`, {
         signal: AbortSignal.timeout(1_500),

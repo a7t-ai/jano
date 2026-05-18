@@ -11,11 +11,22 @@ export type ModelName = string;
  * `name` is what callers should send in the `model` field. `aliases` are
  * additional strings the picker will match against (case-insensitive),
  * useful for back-compat with callers that send a full GGUF id.
+ *
+ * `passthrough` declares the backend as always-resident (e.g. a small whisper
+ * server). Requests to it bypass jano's queue and swap-script entirely and
+ * are forwarded directly, so a long transcription does not block chat traffic
+ * (and vice versa).
+ *
+ * `endpoints` declares which OpenAI routes the backend serves. Defaults to
+ * `["chat/completions"]`. The audio-transcriptions route only considers
+ * models that include `"audio/transcriptions"`.
  */
 export type ModelDef = {
   name: ModelName;
   url: string;
   aliases?: string[];
+  passthrough?: boolean;
+  endpoints?: string[];
 };
 
 /**

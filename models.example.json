@@ -9,6 +9,13 @@
       "name": "code",
       "url": "http://127.0.0.1:8080",
       "aliases": ["coder", "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"]
+    },
+    {
+      "name": "whisper",
+      "url": "http://127.0.0.1:8084",
+      "aliases": ["whisper-1", "mlx-community/whisper-large-v3-turbo"],
+      "passthrough": true,
+      "endpoints": ["audio/transcriptions"]
     }
   ]
 }

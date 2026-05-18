@@ -81,7 +81,24 @@ function loadModels(path: string): ModelDef[] {
       }
       aliases = m.aliases as string[];
     }
-    out.push({ name, url, aliases });
+    let passthrough: boolean | undefined;
+    if (m.passthrough !== undefined) {
+      if (typeof m.passthrough !== 'boolean') {
+        throw new Error(`models[${i}].passthrough must be a boolean`);
+      }
+      passthrough = m.passthrough;
+    }
+    let endpoints: string[] | undefined;
+    if (m.endpoints !== undefined) {
+      if (
+        !Array.isArray(m.endpoints) ||
+        m.endpoints.some((e) => typeof e !== 'string' || e.length === 0)
+      ) {
+        throw new Error(`models[${i}].endpoints must be an array of non-empty strings`);
+      }
+      endpoints = m.endpoints as string[];
+    }
+    out.push({ name, url, aliases, passthrough, endpoints });
   }
 
   if (out.length === 0) {
@@ -132,3 +149,9 @@ export function backendUrl(name: ModelName): string {
 export function modelNames(): ModelName[] {
   return models.map((m) => m.name);
 }
+
+/** Models the dispatcher actually queues + swaps. Passthrough models bypass
+ *  the queue, so the dispatcher should not consider them when computing
+ *  whether to invoke the swap script. */
+export const swapEligibleModels = models.filter((m) => !m.passthrough);
+
