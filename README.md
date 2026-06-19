@@ -150,16 +150,102 @@ Returns the configured models in OpenAI's list format. Useful for clients that p
 
 ### `GET /health` and `GET /status`
 
-Both return the same payload, jano's view of the world:
+Both return the same payload: jano's full view of the world. Because jano sits
+_above_ the backends and owns every request, response, and swap, it can report
+telemetry no single backend (Ollama, `llama-server`, `mlx-lm.server`) can
+produce on its own — queue backlog, swap economics, rolling throughput across
+all callers, and cumulative counters.
 
-```json
+```jsonc
 {
   "ok": true,
   "currentModel": "chat",
+  "currentModelLoadedAt": "2026-06-19T18:02:11.000Z",
+
+  // Queue & concurrency (router-only).
   "queueDepth": 0,
-  "queueByModel": { "chat": 0, "code": 0, "fast": 0 }
+  "queueByModel": { "chat": 0, "code": 0 },
+  "inFlight": 1,
+  "oldestWaitingMs": 0, // age of the head-of-line waiting request
+
+  // Swap economics (router-only — only jano invokes the swap).
+  "lastSwapDurationMs": 21840,
+  "swapsLast15m": 1,
+  "swapsLastHour": 3,
+
+  // Aggregate "lately" throughput across ALL callers (rolling, last N).
+  "recentGenTokS": 47.2,
+  "recentPromptTokS": 312.5,
+  "tokSByModel": { "chat": 51.0, "code": 39.4 },
+
+  // Cumulative counters since start.
+  "uptimeSeconds": 84211,
+  "requestsServedTotal": 128,
+  "requestsByModel": { "chat": 90, "code": 38 },
+  "tokensGeneratedTotal": 51234,
+  "tokensByModel": { "chat": 33001, "code": 18233 },
+  "requestsPerMinute": 4,
+
+  // Error & health signal.
+  "errorsLast15m": 0,
+  "lastError": null,
+  "backendHealth": { "chat": "up", "code": "up" },
 }
 ```
+
+Token counts and tok/s come from the backend's response when it reports them —
+jano normalizes across shapes: OpenAI `usage`, llama.cpp `timings`, and
+Ollama-style nanosecond fields (`eval_count`/`eval_duration`). Generation tok/s
+is otherwise derived from measured time-to-first-byte and completion. When a
+backend reports nothing usable, the relevant fields are simply `null` —
+telemetry degrades gracefully rather than guessing.
+
+### `GET /metrics`
+
+Prometheus text exposition (`v0.0.4`) of the cumulative counters, swap-duration
+histogram, queue gauges, and per-backend health — scrape it straight into
+Grafana, or read it from a client. Sample:
+
+```text
+jano_uptime_seconds 84211
+jano_in_flight 1
+jano_queue_depth{model="chat"} 0
+jano_requests_served_total{model="chat"} 90
+jano_tokens_generated_total{model="chat"} 33001
+jano_swaps_total{from="chat",to="code"} 3
+jano_swap_transition_duration_milliseconds_sum{from="chat",to="code"} 65520
+jano_swap_duration_milliseconds_bucket{le="30000"} 3
+jano_backend_up{model="chat"} 1
+```
+
+### `GET /usage?limit=50`
+
+A ring buffer of the most recent requests (newest first), each with token
+counts and timings — "what did my last N requests cost in compute." The buffer
+size is `USAGE_RECORDS_MAX` (default 500).
+
+```jsonc
+{
+  "count": 2,
+  "records": [
+    {
+      "ts": "2026-06-19T18:05:42.000Z",
+      "model": "chat",
+      "status": 200,
+      "total_ms": 1840,
+      "ttfb_ms": 120,
+      "prompt_tokens": 312,
+      "gen_tokens": 87,
+      "gen_tok_s": 51.0,
+      "prompt_tok_s": 410.2,
+    },
+  ],
+}
+```
+
+> **Out of scope:** GPU temperature, utilization, fan speed, and system
+> RAM/CPU/power are hardware readings outside any router's reach. Jano does
+> not and cannot report them — that's a host-side helper's job.
 
 ## The swap script contract
 
@@ -205,6 +291,7 @@ All via env vars; copy `.env.example` to `.env` to start.
 | `SWAP_WAIT_TIMEOUT_MS`    | no       | `180000`        | Max time jano waits for a backend to become healthy after a swap.          |
 | `HEALTH_POLL_INTERVAL_MS` | no       | `1000`          | How often jano pings `/health` while waiting.                              |
 | `REQUEST_TIMEOUT_MS`      | no       | `600000`        | Per-request upstream timeout. Generous default for cold/large generations. |
+| `USAGE_RECORDS_MAX`       | no       | `500`           | Size of the in-memory recent-request ring served by `GET /usage`.          |
 
 ## When you don't need jano
 

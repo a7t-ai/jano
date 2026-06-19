@@ -4,7 +4,10 @@ import { request as undiciRequest } from 'undici';
 import { backendUrl, env, models } from './config.ts';
 import { getStatus, start, stop } from './dispatcher.ts';
 import { log } from './log.ts';
+import { telemetry } from './metrics.ts';
 import { pickModel } from './picker.ts';
+import { BodyTap } from './bodyTap.ts';
+import { parseResponseStats } from './responseStats.ts';
 import { enqueue, type Task } from './queue.ts';
 import type { ModelDef, ModelName } from './types.ts';
 
@@ -27,6 +30,43 @@ async function readBody(req: http.IncomingMessage): Promise<Buffer> {
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * Turn a finished chat-completions request into a telemetry record. Pulls
+ * token counts + tok/s from the tapped response body when the backend reports
+ * them (llama.cpp `timings` / OpenAI `usage`); otherwise derives generation
+ * tok/s from the measured time between first byte and completion.
+ */
+function recordCompletion(o: {
+  model: ModelName;
+  status: number;
+  enqueuedAt: number;
+  runStart: number;
+  ttfbMs: number | null;
+  doneMs: number;
+  tapText: string | null;
+  isStream: boolean;
+}): void {
+  const stats = o.tapText === null ? null : parseResponseStats(o.tapText, o.isStream);
+  const promptTokens = stats?.promptTokens ?? null;
+  const genTokens = stats?.genTokens ?? null;
+  const promptTokS = stats?.promptTokS ?? null;
+  let genTokS = stats?.genTokS ?? null;
+  if (genTokS === null && genTokens !== null && o.ttfbMs !== null) {
+    const genMs = o.doneMs - (o.runStart + o.ttfbMs);
+    if (genMs > 0) genTokS = genTokens / (genMs / 1000);
+  }
+  telemetry.recordRequest({
+    model: o.model,
+    status: o.status,
+    totalMs: o.doneMs - o.enqueuedAt,
+    ttfbMs: o.ttfbMs,
+    promptTokens,
+    genTokens,
+    genTokS,
+    promptTokS,
+  });
 }
 
 // Hop-by-hop headers per RFC 7230 §6.1; never forward these.
@@ -204,6 +244,7 @@ async function handleChatCompletions(
       return Promise.resolve();
     },
     run: async () => {
+      const runStart = Date.now();
       const upstream = `${backendUrl(model)}/v1/chat/completions`;
       let upstreamRes: Awaited<ReturnType<typeof undiciRequest>>;
       try {
@@ -225,11 +266,20 @@ async function handleChatCompletions(
       if (!res.destroyed) {
         res.writeHead(upstreamRes.statusCode, copyHeaders(upstreamRes.headers));
       }
+      // Tap the body for token/timing telemetry without buffering the whole
+      // stream: a tail window for SSE, the small full body for one-shot JSON.
+      const ctRaw = upstreamRes.headers['content-type'];
+      const contentType = Array.isArray(ctRaw) ? ctRaw.join(' ') : (ctRaw ?? '');
+      const isStream = contentType.includes('text/event-stream');
+      const tap = new BodyTap(isStream);
+      let ttfbMs: number | null = null;
       // Stream regardless of stream:true: undici gives us an async iterator
       // either way, and pumping it is correct for both SSE and one-shot JSON.
       try {
         for await (const chunk of upstreamRes.body) {
           if (clientDisconnected || res.destroyed) break;
+          if (ttfbMs === null) ttfbMs = Date.now() - runStart;
+          tap.push(chunk as Buffer);
           if (!res.write(chunk)) {
             await new Promise<void>((resolve) => {
               const done = () => {
@@ -251,12 +301,25 @@ async function handleChatCompletions(
         throw err;
       }
       if (!res.writableEnded) res.end();
+      const doneMs = Date.now();
       log.info('served', {
         id,
         model,
         status: upstreamRes.statusCode,
-        ms: Date.now() - task.enqueuedAt,
+        ms: doneMs - task.enqueuedAt,
         aborted: clientDisconnected,
+      });
+      recordCompletion({
+        model,
+        // A disconnect-truncated stream is not a clean serve: record it as 499
+        // with null tokens so it doesn't inflate served-total or throughput.
+        status: clientDisconnected ? 499 : upstreamRes.statusCode,
+        enqueuedAt: task.enqueuedAt,
+        runStart,
+        ttfbMs,
+        doneMs,
+        tapText: clientDisconnected ? null : tap.text(),
+        isStream,
       });
     },
   };
@@ -276,6 +339,16 @@ async function handleChatCompletions(
           // Socket may already be gone.
         }
       }
+      telemetry.recordRequest({
+        model,
+        status: 502,
+        totalMs: Date.now() - task.enqueuedAt,
+        ttfbMs: null,
+        promptTokens: null,
+        genTokens: null,
+        genTokS: null,
+        promptTokS: null,
+      });
       throw err;
     }
   };
@@ -352,6 +425,24 @@ function handleStatus(_req: http.IncomingMessage, res: http.ServerResponse): voi
   sendJson(res, 200, { ok: true, ...getStatus() });
 }
 
+function handleUsage(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  const rawLimit = Number(url.searchParams.get('limit') ?? '50');
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 50;
+  const records = telemetry.usageList(limit);
+  sendJson(res, 200, { count: records.length, records });
+}
+
+function handleMetrics(_req: http.IncomingMessage, res: http.ServerResponse): void {
+  const status = getStatus();
+  const body = telemetry.prometheus({
+    queueByModel: status.queueByModel,
+    currentModel: status.currentModel,
+  });
+  res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+  res.end(body);
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const route = `${req.method} ${url.pathname}`;
@@ -369,6 +460,14 @@ const server = http.createServer((req, res) => {
   }
   if (route === 'GET /status' || route === 'GET /health') {
     handleStatus(req, res);
+    return;
+  }
+  if (route === 'GET /usage') {
+    handleUsage(req, res);
+    return;
+  }
+  if (route === 'GET /metrics') {
+    handleMetrics(req, res);
     return;
   }
   sendJson(res, 404, { error: `no route for ${route}` });
