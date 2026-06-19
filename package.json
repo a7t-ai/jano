@@ -1,6 +1,6 @@
 {
   "name": "jano",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenAI-compatible router that batches LLM requests by model so a flurry of mixed calls costs one swap, not many. Backend-agnostic; works with any number of models.",
   "private": true,
   "type": "module",
