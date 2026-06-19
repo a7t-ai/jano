@@ -135,6 +135,11 @@ export const env = {
   /** Reset a model's swap-failure count after it has been quiet this long;
    *  lets the dispatcher retry once a broken backend may have recovered. */
   SWAP_FAILURE_RESET_MS: optInt('SWAP_FAILURE_RESET_MS', 5 * 60_000),
+
+  /** Size of the in-memory recent-request ring served by `GET /usage`. Older
+   *  records are dropped FIFO. Purely an observability buffer; bump it if you
+   *  want a longer benchmark history at the cost of a little memory. */
+  USAGE_RECORDS_MAX: optInt('USAGE_RECORDS_MAX', 500),
 };
 
 export const models: ModelDef[] = loadModels(env.MODELS_FILE);

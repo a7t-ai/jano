@@ -1,8 +1,9 @@
 import type { ModelName } from './types.ts';
 import { env, modelNames } from './config.ts';
 import { FailureBudget } from './failureBudget.ts';
-import { _internal, getQueueByModel, getQueueDepth } from './queue.ts';
+import { _internal, getOldestEnqueuedAt, getQueueByModel, getQueueDepth } from './queue.ts';
 import { detectLoaded, ensureLoaded } from './swap.ts';
+import { telemetry } from './metrics.ts';
 import { log } from './log.ts';
 
 let currentModel: ModelName | null = null;
@@ -15,11 +16,29 @@ let running = false;
 // Reproduces the 2026-05-12 wedge fix.
 const swapFailures = new FailureBudget(env.SWAP_FAILURE_LIMIT, env.SWAP_FAILURE_RESET_MS);
 
+/** A request that never reached a backend (dead client, swap failure) still
+ *  belongs in the usage history with its short-circuit status and no tokens. */
+function recordShortCircuit(model: ModelName, status: number, enqueuedAt: number): void {
+  telemetry.recordRequest({
+    model,
+    status,
+    totalMs: Date.now() - enqueuedAt,
+    ttfbMs: null,
+    promptTokens: null,
+    genTokens: null,
+    genTokS: null,
+    promptTokS: null,
+  });
+}
+
 export function getStatus() {
+  const oldest = getOldestEnqueuedAt();
   return {
     currentModel,
     queueDepth: getQueueDepth(),
     queueByModel: getQueueByModel(modelNames()),
+    oldestWaitingMs: oldest === null ? 0 : Math.max(0, Date.now() - oldest),
+    ...telemetry.snapshot(),
   };
 }
 
@@ -35,6 +54,7 @@ async function loop(): Promise<void> {
 
     if (!task.isAlive()) {
       log.info('dropping disconnected task', { id: task.id, model: task.model });
+      recordShortCircuit(task.model, 499, task.enqueuedAt);
       await task.fail(499, 'client disconnected before dispatch');
       continue;
     }
@@ -47,14 +67,18 @@ async function loop(): Promise<void> {
           model: task.model,
           fails,
         });
+        telemetry.recordError(task.model, `fail-fast: ${fails} consecutive swap failures`);
+        recordShortCircuit(task.model, 503, task.enqueuedAt);
         await task.fail(
           503,
           `backend "${task.model}" is unavailable (${fails} consecutive swap failures; auto-retry in ~${Math.round(env.SWAP_FAILURE_RESET_MS / 1000)}s)`
         );
         continue;
       }
+      const swapStart = Date.now();
       try {
         await ensureLoaded(task.model);
+        telemetry.recordSwap(currentModel, task.model, Date.now() - swapStart);
         currentModel = task.model;
         swapFailures.recordSuccess(task.model);
       } catch (err) {
@@ -65,16 +89,24 @@ async function loop(): Promise<void> {
           fails: newFails,
           err: String(err),
         });
+        telemetry.recordError(task.model, `swap failed: ${String(err)}`);
+        recordShortCircuit(task.model, 503, task.enqueuedAt);
         await task.fail(503, `swap to "${task.model}" failed: ${String(err)}`);
         continue;
       }
     }
 
     try {
-      await task.run();
+      telemetry.incInFlight();
+      try {
+        await task.run();
+      } finally {
+        telemetry.decInFlight();
+      }
       swapFailures.recordSuccess(task.model);
     } catch (err) {
       log.error('task threw', { id: task.id, err: String(err) });
+      telemetry.recordError(task.model, `task threw: ${String(err)}`);
     }
   }
   log.info('dispatcher stopped');
@@ -83,7 +115,9 @@ async function loop(): Promise<void> {
 export async function start(): Promise<void> {
   if (running) return;
   running = true;
+  telemetry.seedModels(modelNames());
   currentModel = await detectLoaded();
+  if (currentModel !== null) telemetry.noteInitialModel(currentModel);
   log.info('dispatcher detected initial model', { currentModel });
   void loop();
 }

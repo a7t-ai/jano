@@ -29,6 +29,16 @@ export function getQueueByModel(modelNames: ModelName[]): Record<string, number>
   return counts;
 }
 
+/** Enqueue time of the oldest waiting task, or null if the queue is empty.
+ *  Powers the `oldestWaitingMs` "am I backed up?" signal on `/status`. */
+export function getOldestEnqueuedAt(): number | null {
+  let oldest: number | null = null;
+  for (const t of queue) {
+    if (oldest === null || t.enqueuedAt < oldest) oldest = t.enqueuedAt;
+  }
+  return oldest;
+}
+
 export function enqueue(task: Task): void {
   queue.push(task);
   wakeUp?.();
