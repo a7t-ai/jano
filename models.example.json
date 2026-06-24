@@ -2,11 +2,13 @@
   "models": [
     {
       "name": "chat",
+      "label": "Qwen3.6 27B",
       "url": "http://127.0.0.1:8081",
       "aliases": ["unsloth/Qwen3.6-27B-GGUF"]
     },
     {
       "name": "code",
+      "label": "Qwen3 Coder 30B",
       "url": "http://127.0.0.1:8080",
       "aliases": ["coder", "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"]
     },

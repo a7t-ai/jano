@@ -71,6 +71,13 @@ function loadModels(path: string): ModelDef[] {
       throw new Error(`duplicate model name "${name}"`);
     }
     seen.add(name);
+    let label: string | undefined;
+    if (m.label !== undefined) {
+      if (typeof m.label !== 'string' || m.label.length === 0) {
+        throw new Error(`models[${i}].label must be a non-empty string`);
+      }
+      label = m.label;
+    }
     let aliases: string[] | undefined;
     if (m.aliases !== undefined) {
       if (
@@ -98,7 +105,7 @@ function loadModels(path: string): ModelDef[] {
       }
       endpoints = m.endpoints as string[];
     }
-    out.push({ name, url, aliases, passthrough, endpoints });
+    out.push({ name, url, label, aliases, passthrough, endpoints });
   }
 
   if (out.length === 0) {

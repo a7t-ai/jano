@@ -416,6 +416,7 @@ function handleModels(_req: http.IncomingMessage, res: http.ServerResponse): voi
       object: 'model',
       created,
       owned_by: 'jano',
+      label: m.label ?? m.name,
       aliases: m.aliases ?? [],
     })),
   });

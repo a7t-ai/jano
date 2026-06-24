@@ -24,6 +24,8 @@ export type ModelName = string;
 export type ModelDef = {
   name: ModelName;
   url: string;
+  /** Human-friendly display name for UIs (e.g. "Qwen3.6 35B"). Falls back to `name`. */
+  label?: string;
   aliases?: string[];
   passthrough?: boolean;
   endpoints?: string[];
